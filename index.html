@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Professional Mobile Karaoke & Multitrack Vocal Recording Studio" />
+    <title>VocalStudio — Multitrack Karaoke DAW</title>
+    <style>
+      /* Fast LCP critical shell background */
+      html, body {
+        background-color: #0a0a0d;
+        color: #f3f4f6;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow-x: hidden;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #root {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body class="bg-studio-bg text-studio-text antialiased selection:bg-studio-red selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
