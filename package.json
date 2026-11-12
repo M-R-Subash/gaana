@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && touch dist/.nojekyll && cd dist && git init && git checkout -b gh-pages && git add -A && git commit -m 'deploy: GitHub Pages' && git remote add origin git@github.com-personal:M-R-Subash/gaana.git && git push -f origin gh-pages && rm -rf .git"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
