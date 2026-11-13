@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useStudio } from '../context/StudioContext';
 import {
   X,
@@ -10,6 +10,7 @@ import {
   Trash2,
   Sparkles,
   CheckCircle2,
+  Mic,
 } from 'lucide-react';
 import { DEMO_LYRICS } from '../audio/demoSong';
 
@@ -27,6 +28,10 @@ export const SongSetupModal: React.FC<SongSetupModalProps> = ({
     loadInstrumentalFile,
     loadDemoProject,
     setLyrics,
+    audioDevices,
+    selectedAudioDeviceId,
+    setSelectedAudioDeviceId,
+    refreshAudioDevices,
   } = useStudio();
 
   const [lyricsInput, setLyricsInput] = useState(project.lyrics);
@@ -38,6 +43,12 @@ export const SongSetupModal: React.FC<SongSetupModalProps> = ({
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      refreshAudioDevices();
+    }
+  }, [isOpen, refreshAudioDevices]);
 
   if (!isOpen) return null;
 
@@ -255,6 +266,40 @@ export const SongSetupModal: React.FC<SongSetupModalProps> = ({
               rows={6}
               className="w-full p-3 rounded-xl bg-studio-card border border-studio-border text-zinc-100 font-sans text-xs sm:text-sm focus:outline-none focus:border-studio-cyan resize-none leading-relaxed"
             />
+          </div>
+
+          {/* Section 3: Microphone Device Picker */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-200 mb-2 flex items-center gap-1.5">
+              <Mic className="w-3.5 h-3.5 text-studio-cyan" />
+              3. Vocal Microphone Input
+            </label>
+
+            {audioDevices.length > 0 ? (
+              <select
+                value={selectedAudioDeviceId}
+                onChange={(e) => setSelectedAudioDeviceId(e.target.value)}
+                className="w-full p-2.5 rounded-xl bg-studio-card border border-studio-border text-xs text-zinc-100 focus:outline-none focus:border-studio-cyan"
+              >
+                <option value="">Default Microphone</option>
+                {audioDevices.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Microphone ${device.deviceId.substring(0, 5)}`}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="p-3 rounded-xl bg-studio-card border border-studio-border text-zinc-400 text-xs flex items-center justify-between">
+                <span>Default System Microphone</span>
+                <button
+                  type="button"
+                  onClick={refreshAudioDevices}
+                  className="text-studio-cyan hover:underline text-[11px]"
+                >
+                  Scan Devices
+                </button>
+              </div>
+            )}
           </div>
 
           {statusMessage && (

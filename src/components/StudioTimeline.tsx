@@ -42,6 +42,7 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
     splitClipAtPlayhead,
     nudgeClipOffset,
     moveClip,
+    trimClip,
     selectedTrackId,
     setSelectedTrackId,
     loadDemoProject,
@@ -132,6 +133,63 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
     if (draggingClipRef.current) {
       e.currentTarget.releasePointerCapture(e.pointerId);
       draggingClipRef.current = null;
+    }
+  };
+
+  // ==========================================
+  // CLIP EDGE TRIMMING LOGIC
+  // ==========================================
+
+  const trimmingClipRef = useRef<{
+    trackId: string;
+    clipId: string;
+    edge: 'left' | 'right';
+    startX: number;
+    initialTrimStart: number;
+    initialTrimEnd: number;
+  } | null>(null);
+
+  const handleTrimStart = (
+    e: React.PointerEvent<HTMLDivElement>,
+    trackId: string,
+    clipId: string,
+    edge: 'left' | 'right',
+    trimStart: number,
+    trimEnd: number
+  ) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setSelectedTrackId(trackId);
+    setSelectedClipId(clipId);
+    trimmingClipRef.current = {
+      trackId,
+      clipId,
+      edge,
+      startX: e.clientX,
+      initialTrimStart: trimStart,
+      initialTrimEnd: trimEnd,
+    };
+  };
+
+  const handleTrimMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!trimmingClipRef.current) return;
+    const { trackId, clipId, edge, startX, initialTrimStart, initialTrimEnd } = trimmingClipRef.current;
+    const deltaX = e.clientX - startX;
+    const deltaSec = deltaX / zoomLevel;
+
+    if (edge === 'left') {
+      const newTrimStart = Math.max(0, initialTrimStart + deltaSec);
+      trimClip(trackId, clipId, newTrimStart, initialTrimEnd);
+    } else {
+      const newTrimEnd = Math.max(0, initialTrimEnd - deltaSec);
+      trimClip(trackId, clipId, initialTrimStart, newTrimEnd);
+    }
+  };
+
+  const handleTrimEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (trimmingClipRef.current) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      trimmingClipRef.current = null;
     }
   };
 
@@ -539,6 +597,34 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
                               height={46}
                               isSelected={isClipSelected}
                             />
+
+                            {/* Left Trim Handle */}
+                            <div
+                              onPointerDown={(e) =>
+                                handleTrimStart(e, track.id, clip.id, 'left', clip.trimStart, clip.trimEnd)
+                              }
+                              onPointerMove={handleTrimMove}
+                              onPointerUp={handleTrimEnd}
+                              onPointerCancel={handleTrimEnd}
+                              className="absolute left-0 top-0 bottom-0 w-2.5 bg-zinc-600/40 hover:bg-studio-cyan/80 active:bg-studio-cyan cursor-ew-resize flex items-center justify-center touch-none z-10 transition-colors"
+                              title="Drag to trim start of vocal clip"
+                            >
+                              <div className="w-[1.5px] h-3 bg-white/70 rounded-full" />
+                            </div>
+
+                            {/* Right Trim Handle */}
+                            <div
+                              onPointerDown={(e) =>
+                                handleTrimStart(e, track.id, clip.id, 'right', clip.trimStart, clip.trimEnd)
+                              }
+                              onPointerMove={handleTrimMove}
+                              onPointerUp={handleTrimEnd}
+                              onPointerCancel={handleTrimEnd}
+                              className="absolute right-0 top-0 bottom-0 w-2.5 bg-zinc-600/40 hover:bg-studio-cyan/80 active:bg-studio-cyan cursor-ew-resize flex items-center justify-center touch-none z-10 transition-colors"
+                              title="Drag to trim end of vocal clip"
+                            >
+                              <div className="w-[1.5px] h-3 bg-white/70 rounded-full" />
+                            </div>
                           </div>
                         </div>
                       );

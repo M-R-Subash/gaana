@@ -1,11 +1,12 @@
 import React from 'react';
 import { useStudio } from '../context/StudioContext';
-import { Sliders, Volume2, VolumeX } from 'lucide-react';
+import { Sliders, Volume2, VolumeX, Sparkles } from 'lucide-react';
 
 export const MixerView: React.FC = () => {
   const {
     project,
     setTrackVolume,
+    setTrackReverb,
     toggleTrackMute,
     toggleTrackSolo,
     setTrackPan,
@@ -108,6 +109,30 @@ export const MixerView: React.FC = () => {
                     value={track.pan}
                     onChange={(e) =>
                       setTrackPan(track.id, parseFloat(e.target.value))
+                    }
+                    className="w-full h-1"
+                  />
+                </div>
+
+                {/* Studio Reverb Slider (Space FX) */}
+                <div className="w-full flex flex-col items-center gap-0.5 mt-2 bg-studio-bg/60 p-1.5 rounded-lg border border-zinc-800">
+                  <div className="flex justify-between w-full text-[9px] font-mono text-zinc-400">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-studio-cyan" />
+                      <span>Reverb</span>
+                    </span>
+                    <span className="text-zinc-300 font-bold">
+                      {Math.round((track.reverb !== undefined ? track.reverb : (track.type === 'vocal' ? 0.2 : 0)) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={track.reverb !== undefined ? track.reverb : (track.type === 'vocal' ? 0.2 : 0)}
+                    onChange={(e) =>
+                      setTrackReverb(track.id, parseFloat(e.target.value))
                     }
                     className="w-full h-1"
                   />

@@ -9,6 +9,8 @@ import {
   Headphones,
   ZoomIn,
   ZoomOut,
+  Timer,
+  X,
 } from 'lucide-react';
 
 function formatTime(seconds: number): string {
@@ -34,6 +36,9 @@ export const TransportBar: React.FC = () => {
     toggleMonitoring,
     zoomLevel,
     setZoomLevel,
+    countInEnabled,
+    toggleCountIn,
+    countInStep,
   } = useStudio();
 
   const isRecording = playbackStatus === 'recording';
@@ -126,6 +131,20 @@ export const TransportBar: React.FC = () => {
             )}
           </button>
 
+          {/* 3-Second Count-In Toggle */}
+          <button
+            onClick={toggleCountIn}
+            className={`hidden xs:flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-mono border transition-all touch-press ${
+              countInEnabled
+                ? 'bg-studio-cyan/20 border-studio-cyan text-studio-cyan'
+                : 'bg-studio-bg border-studio-border text-zinc-500'
+            }`}
+            title="3-Second Count-In / Pre-Roll before Recording"
+          >
+            <Timer className="w-3 h-3" />
+            <span>{countInEnabled ? '3s' : '0s'}</span>
+          </button>
+
           {/* Big Recording Button */}
           <button
             onClick={handleRecordToggle}
@@ -211,6 +230,35 @@ export const TransportBar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* 3-2-1 Animated Pre-Roll Countdown Overlay */}
+      {countInStep !== null && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center select-none animate-in fade-in duration-150">
+          <div className="text-center space-y-4">
+            <span className="text-xs uppercase font-mono tracking-widest text-zinc-400">
+              Get Ready to Sing...
+            </span>
+
+            <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full border-4 border-studio-cyan bg-studio-card flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(6,182,212,0.6)] animate-pulse">
+              <span className="text-5xl sm:text-6xl font-mono font-black text-studio-cyan">
+                {countInStep}
+              </span>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              Recording starts in {countInStep}s
+            </p>
+
+            <button
+              onClick={stop}
+              className="px-4 py-1.5 rounded-full bg-studio-surface border border-zinc-700 text-zinc-300 hover:text-white text-xs flex items-center gap-1.5 mx-auto touch-press"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Cancel</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

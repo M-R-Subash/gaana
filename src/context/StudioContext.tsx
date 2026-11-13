@@ -18,6 +18,10 @@ interface StudioContextType {
   canRedo: boolean;
   selectedTrackId: string | null;
   zoomLevel: number; // Pixels per second (e.g. 20 to 100)
+  countInEnabled: boolean;
+  countInStep: number | null;
+  audioDevices: MediaDeviceInfo[];
+  selectedAudioDeviceId: string;
 
   // Actions
   setActiveTab: (tab: ActiveTab) => void;
@@ -31,9 +35,13 @@ interface StudioContextType {
   stopRecording: () => Promise<void>;
   toggleMonitoring: () => void;
   toggleEchoCancellation: () => void;
+  toggleCountIn: () => void;
+  setSelectedAudioDeviceId: (id: string) => void;
+  refreshAudioDevices: () => Promise<void>;
 
   // Track operations
   setTrackVolume: (trackId: string, volume: number) => void;
+  setTrackReverb: (trackId: string, reverb: number) => void;
   toggleTrackMute: (trackId: string) => void;
   toggleTrackSolo: (trackId: string) => void;
   setTrackPan: (trackId: string, pan: number) => void;
@@ -92,11 +100,30 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [micPeak, setMicPeak] = useState<number>(0);
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const [echoCancellation, setEchoCancellation] = useState<boolean>(true);
+  const [countInEnabled, setCountInEnabled] = useState<boolean>(true);
+  const [countInStep, setCountInStep] = useState<number | null>(null);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedAudioDeviceId, setSelectedAudioDeviceIdState] = useState<string>('');
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(40); // 40px per second on mobile
 
   const projectRef = useRef(project);
   projectRef.current = project;
+  const countInTimeoutRef = useRef<number[]>([]);
+
+  const refreshAudioDevices = useCallback(async () => {
+    const devices = await audioEngine.getAvailableAudioDevices();
+    setAudioDevices(devices);
+  }, []);
+
+  const setSelectedAudioDeviceId = useCallback((id: string) => {
+    setSelectedAudioDeviceIdState(id);
+    audioEngine.setSelectedDeviceId(id);
+  }, []);
+
+  const toggleCountIn = useCallback(() => {
+    setCountInEnabled((prev) => !prev);
+  }, []);
 
   // Calculate project total duration
   const totalDuration = React.useMemo(() => {
@@ -163,6 +190,9 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const stop = useCallback(() => {
+    countInTimeoutRef.current.forEach((t) => clearTimeout(t));
+    countInTimeoutRef.current = [];
+    setCountInStep(null);
     audioEngine.stop();
   }, []);
 
@@ -186,12 +216,41 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const startRecording = useCallback(async () => {
     try {
+      if (countInEnabled) {
+        countInTimeoutRef.current.forEach((t) => clearTimeout(t));
+        countInTimeoutRef.current = [];
+
+        setCountInStep(3);
+        audioEngine.playCountInBeep(false);
+
+        await new Promise<void>((resolve) => {
+          const t1 = window.setTimeout(() => {
+            setCountInStep(2);
+            audioEngine.playCountInBeep(false);
+          }, 1000);
+
+          const t2 = window.setTimeout(() => {
+            setCountInStep(1);
+            audioEngine.playCountInBeep(false);
+          }, 2000);
+
+          const t3 = window.setTimeout(() => {
+            setCountInStep(null);
+            audioEngine.playCountInBeep(true);
+            resolve();
+          }, 3000);
+
+          countInTimeoutRef.current = [t1, t2, t3];
+        });
+      }
+
       await audioEngine.startRecording(projectRef.current.tracks, totalDuration);
     } catch (err) {
+      setCountInStep(null);
       console.error('Failed to start recording:', err);
       alert('Microphone access is required to record vocals. Please grant mic permission.');
     }
-  }, [totalDuration]);
+  }, [countInEnabled, totalDuration]);
 
   const stopRecording = useCallback(async () => {
     try {
@@ -232,6 +291,13 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setProject((prev) => ({
       ...prev,
       tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, volume } : t)),
+    }));
+  }, []);
+
+  const setTrackReverb = useCallback((trackId: string, reverb: number) => {
+    setProject((prev) => ({
+      ...prev,
+      tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, reverb: Math.max(0, Math.min(1, reverb)) } : t)),
     }));
   }, []);
 
@@ -539,6 +605,10 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         micPeak,
         isMonitoring,
         echoCancellation,
+        countInEnabled,
+        countInStep,
+        audioDevices,
+        selectedAudioDeviceId,
         canUndo: history.length > 0,
         canRedo: redoStack.length > 0,
         selectedTrackId,
@@ -554,7 +624,11 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         stopRecording,
         toggleMonitoring,
         toggleEchoCancellation,
+        toggleCountIn,
+        setSelectedAudioDeviceId,
+        refreshAudioDevices,
         setTrackVolume,
+        setTrackReverb,
         toggleTrackMute,
         toggleTrackSolo,
         setTrackPan,

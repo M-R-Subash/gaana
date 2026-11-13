@@ -12,6 +12,25 @@ interface PlayingNodeInfo {
   clipId: string;
 }
 
+/**
+ * Creates an algorithmic stereo impulse response for studio vocal room reverb.
+ */
+function createReverbImpulse(ctx: BaseAudioContext, duration = 1.6, decay = 2.2): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.floor(sampleRate * duration);
+  const impulse = ctx.createBuffer(2, length, sampleRate);
+  const left = impulse.getChannelData(0);
+  const right = impulse.getChannelData(1);
+
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+    const factor = Math.exp(-decay * t);
+    left[i] = (Math.random() * 2 - 1) * factor;
+    right[i] = (Math.random() * 2 - 1) * factor;
+  }
+  return impulse;
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private status: 'stopped' | 'playing' | 'recording' | 'paused' = 'stopped';
@@ -21,7 +40,14 @@ export class AudioEngine {
   private playbackStartCtxTime = 0; // ctx.currentTime when playback started
   private activeSourceNodes: PlayingNodeInfo[] = [];
   private trackGainNodes: Map<string, GainNode> = new Map();
+  private trackReverbSendNodes: Map<string, GainNode> = new Map();
   private animationFrameId: number | null = null;
+
+  // Master Limiter & Reverb Bus
+  private masterGain: GainNode | null = null;
+  private masterCompressor: DynamicsCompressorNode | null = null;
+  private reverbNode: ConvolverNode | null = null;
+  private reverbGain: GainNode | null = null;
 
   // Recording
   private mediaStream: MediaStream | null = null;
@@ -33,14 +59,12 @@ export class AudioEngine {
   private isMonitoring = false;
   private monitorGain: GainNode | null = null;
   private echoCancellation = true; // Enabled by default to eliminate speaker bleed if singing with speakers
+  private selectedDeviceId: string = '';
 
   // Callbacks
   private onTimeUpdate: TimeUpdateCallback | null = null;
   private onMeterUpdate: MeterUpdateCallback | null = null;
   private onStatusUpdate: StatusUpdateCallback | null = null;
-
-  // Master Gain
-  private masterGain: GainNode | null = null;
 
   constructor() {
     // AudioContext will be initialized on first user gesture
@@ -50,9 +74,30 @@ export class AudioEngine {
     if (!this.ctx) {
       const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtxClass();
+
+      // Master Anti-Clipping Limiter / Compressor
+      this.masterCompressor = this.ctx.createDynamicsCompressor();
+      this.masterCompressor.threshold.setValueAtTime(-12, 0);
+      this.masterCompressor.knee.setValueAtTime(6, 0);
+      this.masterCompressor.ratio.setValueAtTime(8, 0);
+      this.masterCompressor.attack.setValueAtTime(0.003, 0);
+      this.masterCompressor.release.setValueAtTime(0.15, 0);
+
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 1.0;
-      this.masterGain.connect(this.ctx.destination);
+
+      // Master Reverb Bus
+      this.reverbNode = this.ctx.createConvolver();
+      this.reverbNode.buffer = createReverbImpulse(this.ctx, 1.6, 2.2);
+      this.reverbGain = this.ctx.createGain();
+      this.reverbGain.gain.value = 0.7;
+
+      this.reverbNode.connect(this.reverbGain);
+      this.reverbGain.connect(this.masterGain);
+
+      // Connect: masterGain -> masterCompressor -> destination
+      this.masterGain.connect(this.masterCompressor);
+      this.masterCompressor.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
@@ -126,6 +171,17 @@ export class AudioEngine {
         gainNode = ctx.createGain();
         gainNode.connect(this.masterGain!);
         this.trackGainNodes.set(track.id, gainNode);
+      }
+
+      // Setup track Reverb Send Node
+      let reverbSendNode = this.trackReverbSendNodes.get(track.id);
+      if (!reverbSendNode && this.reverbNode) {
+        reverbSendNode = ctx.createGain();
+        const defaultReverb = track.reverb !== undefined ? track.reverb : (track.type === 'vocal' ? 0.2 : 0);
+        reverbSendNode.gain.setValueAtTime(defaultReverb, ctx.currentTime);
+        gainNode.connect(reverbSendNode);
+        reverbSendNode.connect(this.reverbNode);
+        this.trackReverbSendNodes.set(track.id, reverbSendNode);
       }
 
       // Check track audibility
@@ -254,6 +310,12 @@ export class AudioEngine {
         }
         gainNode.gain.setTargetAtTime(targetGain, this.ctx!.currentTime, 0.02);
       }
+
+      const reverbSendNode = this.trackReverbSendNodes.get(track.id);
+      if (reverbSendNode) {
+        const targetReverb = track.reverb !== undefined ? track.reverb : (track.type === 'vocal' ? 0.2 : 0);
+        reverbSendNode.gain.setTargetAtTime(targetReverb, this.ctx!.currentTime, 0.02);
+      }
     });
   }
 
@@ -268,17 +330,69 @@ export class AudioEngine {
     if (this.mediaStream) {
       return this.mediaStream;
     }
+    const audioConstraints: MediaTrackConstraints = {
+      echoCancellation: this.echoCancellation, // Active cancellation prevents speaker bleed into mic
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    };
+    if (this.selectedDeviceId) {
+      audioConstraints.deviceId = { exact: this.selectedDeviceId };
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: this.echoCancellation, // Active cancellation prevents speaker bleed into mic
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
+      audio: audioConstraints,
     });
     this.mediaStream = stream;
     this.setupMicAnalyser(stream);
     return stream;
+  }
+
+  public setSelectedDeviceId(id: string) {
+    this.selectedDeviceId = id;
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach((t) => t.stop());
+      this.mediaStream = null;
+      if (this.micAnalyser) {
+        this.micAnalyser.disconnect();
+        this.micAnalyser = null;
+      }
+    }
+  }
+
+  public getSelectedDeviceId(): string {
+    return this.selectedDeviceId;
+  }
+
+  public async getAvailableAudioDevices(): Promise<MediaDeviceInfo[]> {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter((d) => d.kind === 'audioinput');
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Plays a clean studio count-in metronome beep for 3-2-1 pre-roll.
+   */
+  public playCountInBeep(isHigh = false) {
+    const ctx = this.getAudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(isHigh ? 1200 : 800, ctx.currentTime);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.09);
   }
 
   private setupMicAnalyser(stream: MediaStream) {
@@ -539,10 +653,28 @@ export class AudioEngine {
 
     const hasSolo = tracks.some((t) => t.isSolo);
 
-    // Master limiter/gain
+    // Master Anti-Clipping Limiter / Compressor for Export
+    const masterCompressor = offlineCtx.createDynamicsCompressor();
+    masterCompressor.threshold.setValueAtTime(-12, 0);
+    masterCompressor.knee.setValueAtTime(6, 0);
+    masterCompressor.ratio.setValueAtTime(8, 0);
+    masterCompressor.attack.setValueAtTime(0.003, 0);
+    masterCompressor.release.setValueAtTime(0.15, 0);
+
     const masterGainNode = offlineCtx.createGain();
     masterGainNode.gain.value = masterVolume;
-    masterGainNode.connect(offlineCtx.destination);
+
+    // Connect: masterGain -> masterCompressor -> destination
+    masterGainNode.connect(masterCompressor);
+    masterCompressor.connect(offlineCtx.destination);
+
+    // Master Reverb Bus for Export
+    const offlineReverb = offlineCtx.createConvolver();
+    offlineReverb.buffer = createReverbImpulse(offlineCtx, 1.6, 2.2);
+    const offlineReverbGain = offlineCtx.createGain();
+    offlineReverbGain.gain.value = 0.7;
+    offlineReverb.connect(offlineReverbGain);
+    offlineReverbGain.connect(masterGainNode);
 
     for (const track of tracks) {
       // Determine if track should be in mix
@@ -566,6 +698,15 @@ export class AudioEngine {
         panner.connect(masterGainNode);
       } else {
         trackGain.connect(masterGainNode);
+      }
+
+      // Reverb send in offline mix
+      const targetReverb = track.reverb !== undefined ? track.reverb : (track.type === 'vocal' ? 0.2 : 0);
+      if (targetReverb > 0) {
+        const reverbSend = offlineCtx.createGain();
+        reverbSend.gain.value = targetReverb;
+        trackGain.connect(reverbSend);
+        reverbSend.connect(offlineReverb);
       }
 
       for (const clip of track.clips) {

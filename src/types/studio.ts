@@ -17,6 +17,7 @@ export interface AudioTrack {
   isMuted: boolean;
   isSolo: boolean;
   pan: number;           // -1.0 (L) to 1.0 (R)
+  reverb?: number;       // 0.0 to 1.0 (Vocal Studio Space FX)
   clips: AudioClip[];
   color: string;
   isLocked?: boolean;
