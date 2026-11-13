@@ -13,6 +13,7 @@ interface StudioContextType {
   micRms: number;
   micPeak: number;
   isMonitoring: boolean;
+  echoCancellation: boolean;
   canUndo: boolean;
   canRedo: boolean;
   selectedTrackId: string | null;
@@ -29,6 +30,7 @@ interface StudioContextType {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<void>;
   toggleMonitoring: () => void;
+  toggleEchoCancellation: () => void;
 
   // Track operations
   setTrackVolume: (trackId: string, volume: number) => void;
@@ -38,6 +40,8 @@ interface StudioContextType {
   renameTrack: (trackId: string, name: string) => void;
   deleteTrack: (trackId: string) => void;
   duplicateTrack: (trackId: string) => void;
+  addEmptyVocalTrack: () => void;
+  moveClip: (trackId: string, clipId: string, newStartTime: number) => void;
   nudgeClipOffset: (trackId: string, clipId: string, deltaSeconds: number) => void;
   trimClip: (trackId: string, clipId: string, trimStart: number, trimEnd: number) => void;
   splitClipAtPlayhead: (trackId: string) => void;
@@ -87,6 +91,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [micRms, setMicRms] = useState<number>(0);
   const [micPeak, setMicPeak] = useState<number>(0);
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
+  const [echoCancellation, setEchoCancellation] = useState<boolean>(true);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(40); // 40px per second on mobile
 
@@ -170,6 +175,14 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsMonitoring(next);
     audioEngine.setMonitoring(next);
   }, [isMonitoring]);
+
+  const toggleEchoCancellation = useCallback(() => {
+    setEchoCancellation((prev) => {
+      const next = !prev;
+      audioEngine.setEchoCancellation(next);
+      return next;
+    });
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -282,6 +295,44 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     pushHistory(updated);
   }, [pushHistory]);
+
+  const addEmptyVocalTrack = useCallback(() => {
+    const vocalCount = projectRef.current.tracks.filter((t) => t.type === 'vocal').length + 1;
+    const colorIndex = (vocalCount % (TRACK_COLORS.length - 1)) + 1;
+
+    const newTrack: AudioTrack = {
+      id: 'track_' + Date.now(),
+      name: `Vocal ${vocalCount}`,
+      type: 'vocal',
+      volume: 1.0,
+      isMuted: false,
+      isSolo: false,
+      pan: 0,
+      clips: [],
+      color: TRACK_COLORS[colorIndex],
+    };
+
+    const updated = {
+      ...projectRef.current,
+      tracks: [...projectRef.current.tracks, newTrack],
+    };
+    pushHistory(updated);
+    setSelectedTrackId(newTrack.id);
+  }, [pushHistory]);
+
+  const moveClip = useCallback((trackId: string, clipId: string, newStartTime: number) => {
+    const safeStart = Math.max(0, newStartTime);
+    setProject((prev) => ({
+      ...prev,
+      tracks: prev.tracks.map((t) => {
+        if (t.id !== trackId) return t;
+        return {
+          ...t,
+          clips: t.clips.map((c) => (c.id === clipId ? { ...c, startTime: safeStart } : c)),
+        };
+      }),
+    }));
+  }, []);
 
   const nudgeClipOffset = useCallback((trackId: string, clipId: string, deltaSeconds: number) => {
     const updated = {
@@ -487,6 +538,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         micRms,
         micPeak,
         isMonitoring,
+        echoCancellation,
         canUndo: history.length > 0,
         canRedo: redoStack.length > 0,
         selectedTrackId,
@@ -501,6 +553,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         startRecording,
         stopRecording,
         toggleMonitoring,
+        toggleEchoCancellation,
         setTrackVolume,
         toggleTrackMute,
         toggleTrackSolo,
@@ -508,6 +561,8 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         renameTrack,
         deleteTrack,
         duplicateTrack,
+        addEmptyVocalTrack,
+        moveClip,
         nudgeClipOffset,
         trimClip,
         splitClipAtPlayhead,

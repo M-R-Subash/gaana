@@ -32,6 +32,7 @@ export class AudioEngine {
   private meterAnimFrameId: number | null = null;
   private isMonitoring = false;
   private monitorGain: GainNode | null = null;
+  private echoCancellation = true; // Enabled by default to eliminate speaker bleed if singing with speakers
 
   // Callbacks
   private onTimeUpdate: TimeUpdateCallback | null = null;
@@ -269,7 +270,7 @@ export class AudioEngine {
     }
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: false, // Pure vocal capture without voice processing artifacts
+        echoCancellation: this.echoCancellation, // Active cancellation prevents speaker bleed into mic
         noiseSuppression: false,
         autoGainControl: false,
         channelCount: 1,
@@ -307,6 +308,23 @@ export class AudioEngine {
 
   public getMonitoring(): boolean {
     return this.isMonitoring;
+  }
+
+  public setEchoCancellation(enabled: boolean) {
+    this.echoCancellation = enabled;
+    if (this.mediaStream) {
+      // Release current stream so next recording re-initializes with updated constraint
+      this.mediaStream.getTracks().forEach((t) => t.stop());
+      this.mediaStream = null;
+      if (this.micAnalyser) {
+        this.micAnalyser.disconnect();
+        this.micAnalyser = null;
+      }
+    }
+  }
+
+  public getEchoCancellation(): boolean {
+    return this.echoCancellation;
   }
 
   private startMeterLoop() {
