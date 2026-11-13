@@ -39,6 +39,8 @@ export const TransportBar: React.FC = () => {
     countInEnabled,
     toggleCountIn,
     countInStep,
+    autoFollowPlayhead,
+    toggleAutoFollowPlayhead,
   } = useStudio();
 
   const isRecording = playbackStatus === 'recording';
@@ -97,6 +99,17 @@ export const TransportBar: React.FC = () => {
               title="Zoom In"
             >
               <ZoomIn className="w-3 h-3" />
+            </button>
+            <button
+              onClick={toggleAutoFollowPlayhead}
+              className={`hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors touch-press ${
+                autoFollowPlayhead
+                  ? 'bg-studio-cyan/20 border-studio-cyan text-studio-cyan'
+                  : 'bg-studio-bg border-studio-border text-zinc-500'
+              }`}
+              title="Auto-scroll timeline to follow playhead"
+            >
+              Scroll
             </button>
           </div>
         </div>

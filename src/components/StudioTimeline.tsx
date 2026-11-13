@@ -13,6 +13,9 @@ import {
   Music,
   Plus,
   GripHorizontal,
+  FileText,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface StudioTimelineProps {
@@ -32,7 +35,10 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
     project,
     currentTime,
     totalDuration,
+    playbackStatus,
+    autoFollowPlayhead,
     zoomLevel,
+    setZoomLevel,
     seek,
     toggleTrackMute,
     toggleTrackSolo,
@@ -50,8 +56,10 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
   } = useStudio();
 
   const rulerRef = useRef<HTMLDivElement | null>(null);
+  const timelineScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [showMiniLyrics, setShowMiniLyrics] = useState(false);
 
   // Playhead dragging state
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -203,6 +211,48 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
   const displayTime = isScrubbing && scrubPreviewTime !== null ? scrubPreviewTime : currentTime;
   const playheadLeft = displayTime * zoomLevel;
 
+  // Auto-scroll timeline to follow playhead smoothly during playback/recording
+  useEffect(() => {
+    if (!autoFollowPlayhead || (playbackStatus !== 'playing' && playbackStatus !== 'recording')) return;
+    const container = timelineScrollContainerRef.current;
+    if (!container) return;
+
+    const currentScroll = container.scrollLeft;
+    const containerWidth = container.clientWidth;
+    const targetScroll = playheadLeft - containerWidth * 0.45;
+
+    if (playheadLeft > currentScroll + containerWidth * 0.8 || playheadLeft < currentScroll + 30) {
+      container.scrollTo({ left: Math.max(0, targetScroll), behavior: 'smooth' });
+    }
+  }, [displayTime, autoFollowPlayhead, playbackStatus, playheadLeft]);
+
+  // Mobile Two-Finger Pinch-to-Zoom Gesture
+  const pinchRef = useRef<{ initialDist: number; initialZoom: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      pinchRef.current = { initialDist: dist, initialZoom: zoomLevel };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const ratio = dist / pinchRef.current.initialDist;
+      const newZoom = Math.max(15, Math.min(120, Math.round(pinchRef.current.initialZoom * ratio)));
+      setZoomLevel(newZoom);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    pinchRef.current = null;
+  };
+
   // Ruler markers every 5 seconds
   const stepSeconds = zoomLevel < 30 ? 10 : 5;
   const markerCount = Math.ceil(totalDuration / stepSeconds) + 2;
@@ -288,8 +338,39 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({ onOpenSetup }) =
         </div>
       )}
 
+      {/* Optional Collapsible Mini-Lyrics Karaoke Prompter for Timeline */}
+      {project.lyrics.trim() && (
+        <div className="bg-[#121217] border-b border-studio-border px-3 py-1 flex flex-col z-20 flex-shrink-0">
+          <button
+            onClick={() => setShowMiniLyrics(!showMiniLyrics)}
+            className="flex items-center justify-between text-[11px] text-zinc-400 hover:text-white"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              <FileText className="w-3.5 h-3.5 text-studio-cyan" />
+              <span>Mini Lyrics Prompter</span>
+            </span>
+            <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+              <span>{showMiniLyrics ? 'Hide' : 'Show'}</span>
+              {showMiniLyrics ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </div>
+          </button>
+
+          {showMiniLyrics && (
+            <div className="mt-1 p-2 rounded-lg bg-black/50 border border-zinc-800 text-xs font-sans text-zinc-200 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap select-text">
+              {project.lyrics}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main Multitrack Timeline Area with Fixed Left Column and Scrollable Waveforms */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto relative flex flex-col">
+      <div
+        ref={timelineScrollContainerRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="flex-1 overflow-x-auto overflow-y-auto relative flex flex-col"
+      >
         <div style={{ width: `${timelineWidth + 180}px` }} className="min-w-full flex flex-col">
           {/* TOP ROW: Sticky Header + Ruler */}
           <div className="h-9 flex border-b border-studio-border sticky top-0 z-40 bg-studio-surface">

@@ -3,6 +3,7 @@ import { ProjectData, AudioTrack, AudioClip, PlaybackStatus, ActiveTab } from '.
 import { audioEngine } from '../audio/AudioEngine';
 import { extractPeaks } from '../audio/waveformUtils';
 import { createDemoInstrumentalBuffer, DEMO_LYRICS } from '../audio/demoSong';
+import { requestScreenWakeLock, releaseScreenWakeLock, triggerHaptic } from '../utils/mobileUtils';
 
 interface StudioContextType {
   project: ProjectData;
@@ -14,6 +15,7 @@ interface StudioContextType {
   micPeak: number;
   isMonitoring: boolean;
   echoCancellation: boolean;
+  autoFollowPlayhead: boolean;
   canUndo: boolean;
   canRedo: boolean;
   selectedTrackId: string | null;
@@ -35,6 +37,7 @@ interface StudioContextType {
   stopRecording: () => Promise<void>;
   toggleMonitoring: () => void;
   toggleEchoCancellation: () => void;
+  toggleAutoFollowPlayhead: () => void;
   toggleCountIn: () => void;
   setSelectedAudioDeviceId: (id: string) => void;
   refreshAudioDevices: () => Promise<void>;
@@ -100,6 +103,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [micPeak, setMicPeak] = useState<number>(0);
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const [echoCancellation, setEchoCancellation] = useState<boolean>(true);
+  const [autoFollowPlayhead, setAutoFollowPlayhead] = useState<boolean>(true);
   const [countInEnabled, setCountInEnabled] = useState<boolean>(true);
   const [countInStep, setCountInStep] = useState<number | null>(null);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
@@ -123,7 +127,22 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const toggleCountIn = useCallback(() => {
     setCountInEnabled((prev) => !prev);
+    triggerHaptic('light');
   }, []);
+
+  const toggleAutoFollowPlayhead = useCallback(() => {
+    setAutoFollowPlayhead((prev) => !prev);
+    triggerHaptic('light');
+  }, []);
+
+  // Screen WakeLock: prevents mobile phone screen from dimming or locking while performing
+  useEffect(() => {
+    if (playbackStatus === 'playing' || playbackStatus === 'recording') {
+      requestScreenWakeLock();
+    } else {
+      releaseScreenWakeLock();
+    }
+  }, [playbackStatus]);
 
   // Calculate project total duration
   const totalDuration = React.useMemo(() => {
@@ -222,26 +241,32 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         setCountInStep(3);
         audioEngine.playCountInBeep(false);
+        triggerHaptic('countdown');
 
         await new Promise<void>((resolve) => {
           const t1 = window.setTimeout(() => {
             setCountInStep(2);
             audioEngine.playCountInBeep(false);
+            triggerHaptic('countdown');
           }, 1000);
 
           const t2 = window.setTimeout(() => {
             setCountInStep(1);
             audioEngine.playCountInBeep(false);
+            triggerHaptic('countdown');
           }, 2000);
 
           const t3 = window.setTimeout(() => {
             setCountInStep(null);
             audioEngine.playCountInBeep(true);
+            triggerHaptic('heavy');
             resolve();
           }, 3000);
 
           countInTimeoutRef.current = [t1, t2, t3];
         });
+      } else {
+        triggerHaptic('heavy');
       }
 
       await audioEngine.startRecording(projectRef.current.tracks, totalDuration);
@@ -255,6 +280,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const stopRecording = useCallback(async () => {
     try {
       const { clip } = await audioEngine.stopRecording();
+      triggerHaptic('success');
 
       // Automatically create a new vocal track layer
       const vocalCount = projectRef.current.tracks.filter((t) => t.type === 'vocal').length + 1;
@@ -302,6 +328,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const toggleTrackMute = useCallback((trackId: string) => {
+    triggerHaptic('light');
     setProject((prev) => ({
       ...prev,
       tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, isMuted: !t.isMuted } : t)),
@@ -309,6 +336,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const toggleTrackSolo = useCallback((trackId: string) => {
+    triggerHaptic('light');
     setProject((prev) => ({
       ...prev,
       tracks: prev.tracks.map((t) => (t.id === trackId ? { ...t, isSolo: !t.isSolo } : t)),
@@ -605,6 +633,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         micPeak,
         isMonitoring,
         echoCancellation,
+        autoFollowPlayhead,
         countInEnabled,
         countInStep,
         audioDevices,
@@ -624,6 +653,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         stopRecording,
         toggleMonitoring,
         toggleEchoCancellation,
+        toggleAutoFollowPlayhead,
         toggleCountIn,
         setSelectedAudioDeviceId,
         refreshAudioDevices,
