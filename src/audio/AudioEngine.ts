@@ -59,6 +59,7 @@ export class AudioEngine {
   private isMonitoring = false;
   private monitorGain: GainNode | null = null;
   private echoCancellation = true; // Enabled by default to eliminate speaker bleed if singing with speakers
+  private noiseSuppression = true; // Enabled by default to eliminate room background noise (fans, AC, hiss)
   private selectedDeviceId: string = '';
 
   // Callbacks
@@ -332,7 +333,7 @@ export class AudioEngine {
     }
     const audioConstraints: MediaTrackConstraints = {
       echoCancellation: this.echoCancellation, // Active cancellation prevents speaker bleed into mic
-      noiseSuppression: false,
+      noiseSuppression: this.noiseSuppression, // Active ambient noise suppression (fans, AC, hiss)
       autoGainControl: false,
       channelCount: 1,
     };
@@ -424,21 +425,58 @@ export class AudioEngine {
     return this.isMonitoring;
   }
 
-  public setEchoCancellation(enabled: boolean) {
+  public async setEchoCancellation(enabled: boolean) {
     this.echoCancellation = enabled;
     if (this.mediaStream) {
-      // Release current stream so next recording re-initializes with updated constraint
-      this.mediaStream.getTracks().forEach((t) => t.stop());
-      this.mediaStream = null;
-      if (this.micAnalyser) {
-        this.micAnalyser.disconnect();
-        this.micAnalyser = null;
+      const track = this.mediaStream.getAudioTracks()[0];
+      if (track && typeof track.applyConstraints === 'function') {
+        try {
+          await track.applyConstraints({ echoCancellation: enabled });
+          return;
+        } catch {
+          // Fall back to restarting stream when not recording
+        }
+      }
+      if (this.status !== 'recording') {
+        this.mediaStream.getTracks().forEach((t) => t.stop());
+        this.mediaStream = null;
+        if (this.micAnalyser) {
+          this.micAnalyser.disconnect();
+          this.micAnalyser = null;
+        }
       }
     }
   }
 
   public getEchoCancellation(): boolean {
     return this.echoCancellation;
+  }
+
+  public async setNoiseSuppression(enabled: boolean) {
+    this.noiseSuppression = enabled;
+    if (this.mediaStream) {
+      const track = this.mediaStream.getAudioTracks()[0];
+      if (track && typeof track.applyConstraints === 'function') {
+        try {
+          await track.applyConstraints({ noiseSuppression: enabled });
+          return;
+        } catch {
+          // Fall back to restarting stream when not recording
+        }
+      }
+      if (this.status !== 'recording') {
+        this.mediaStream.getTracks().forEach((t) => t.stop());
+        this.mediaStream = null;
+        if (this.micAnalyser) {
+          this.micAnalyser.disconnect();
+          this.micAnalyser = null;
+        }
+      }
+    }
+  }
+
+  public getNoiseSuppression(): boolean {
+    return this.noiseSuppression;
   }
 
   private startMeterLoop() {
@@ -584,7 +622,13 @@ export class AudioEngine {
             type: this.mediaRecorder?.mimeType || 'audio/webm',
           });
           const arrayBuf = await blob.arrayBuffer();
-          const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+          let audioBuffer = await ctx.decodeAudioData(arrayBuf);
+
+          // Studio Vocal Cleaner: 80Hz rumble cut + gentle background hiss expander
+          if (this.noiseSuppression) {
+            audioBuffer = await this.cleanVocalAudioBuffer(audioBuffer);
+          }
+
           const peaks = extractPeaks(audioBuffer, 400);
 
           const clip: AudioClip = {
@@ -615,6 +659,81 @@ export class AudioEngine {
 
       this.mediaRecorder.stop();
     });
+  }
+
+  /**
+   * Cleans recorded vocal audio by filtering out low-end room rumble (< 80Hz)
+   * and applying smooth downward expansion on low-level background noise/hiss.
+   */
+  public async cleanVocalAudioBuffer(buffer: AudioBuffer): Promise<AudioBuffer> {
+    if (!buffer || buffer.length === 0) return buffer;
+    try {
+      const offlineCtx = new OfflineAudioContext(
+        buffer.numberOfChannels,
+        buffer.length,
+        buffer.sampleRate
+      );
+
+      const source = offlineCtx.createBufferSource();
+      source.buffer = buffer;
+
+      // 1. Studio 80Hz High-pass Filter (cuts room rumble, AC hum, mic handling vibrations)
+      const highpass = offlineCtx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 80;
+      highpass.Q.value = 0.707;
+
+      source.connect(highpass);
+      highpass.connect(offlineCtx.destination);
+      source.start(0);
+
+      const filteredBuffer = await offlineCtx.startRendering();
+
+      // 2. Gentle downward expansion on silence gaps to eliminate quiet room hiss
+      this.applySmoothNoiseExpander(filteredBuffer, -48);
+
+      return filteredBuffer;
+    } catch (e) {
+      console.warn('Vocal audio clean warning:', e);
+      return buffer;
+    }
+  }
+
+  /**
+   * Gentle noise expander: smoothly attenuates background hiss below threshold dB
+   * without chopping vocal attacks or decays.
+   */
+  private applySmoothNoiseExpander(buffer: AudioBuffer, thresholdDb: number = -48) {
+    const thresholdAmp = Math.pow(10, thresholdDb / 20); // -48dB is ~0.00398
+    const windowSize = Math.max(128, Math.floor(buffer.sampleRate * 0.015)); // ~15ms window
+    const numChannels = buffer.numberOfChannels;
+
+    for (let c = 0; c < numChannels; c++) {
+      const data = buffer.getChannelData(c);
+      let currentGain = 1.0;
+
+      for (let i = 0; i < data.length; i += windowSize) {
+        const end = Math.min(i + windowSize, data.length);
+        let sumSq = 0;
+        for (let j = i; j < end; j++) {
+          sumSq += data[j] * data[j];
+        }
+        const rms = Math.sqrt(sumSq / (end - i));
+
+        let targetGain = 1.0;
+        if (rms < thresholdAmp) {
+          // Attenuate quiet room noise smoothly down to ~15% (-16dB reduction), not harsh cutoff
+          const factor = rms / thresholdAmp;
+          targetGain = 0.15 + 0.85 * (factor * factor);
+        }
+
+        const gainStep = (targetGain - currentGain) / (end - i);
+        for (let j = i; j < end; j++) {
+          currentGain += gainStep;
+          data[j] *= currentGain;
+        }
+      }
+    }
   }
 
   // ==========================================

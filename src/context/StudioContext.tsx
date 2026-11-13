@@ -15,6 +15,7 @@ interface StudioContextType {
   micPeak: number;
   isMonitoring: boolean;
   echoCancellation: boolean;
+  noiseSuppression: boolean;
   autoFollowPlayhead: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -37,6 +38,9 @@ interface StudioContextType {
   stopRecording: () => Promise<void>;
   toggleMonitoring: () => void;
   toggleEchoCancellation: () => void;
+  setEchoCancellation: (enabled: boolean) => void;
+  toggleNoiseSuppression: () => void;
+  setNoiseSuppression: (enabled: boolean) => void;
   toggleAutoFollowPlayhead: () => void;
   toggleCountIn: () => void;
   setSelectedAudioDeviceId: (id: string) => void;
@@ -103,6 +107,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [micPeak, setMicPeak] = useState<number>(0);
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const [echoCancellation, setEchoCancellation] = useState<boolean>(true);
+  const [noiseSuppression, setNoiseSuppression] = useState<boolean>(true);
   const [autoFollowPlayhead, setAutoFollowPlayhead] = useState<boolean>(true);
   const [countInEnabled, setCountInEnabled] = useState<boolean>(true);
   const [countInStep, setCountInStep] = useState<number | null>(null);
@@ -231,6 +236,24 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       audioEngine.setEchoCancellation(next);
       return next;
     });
+  }, []);
+
+  const setEchoCancellationExplicit = useCallback((enabled: boolean) => {
+    setEchoCancellation(enabled);
+    audioEngine.setEchoCancellation(enabled);
+  }, []);
+
+  const toggleNoiseSuppression = useCallback(() => {
+    setNoiseSuppression((prev) => {
+      const next = !prev;
+      audioEngine.setNoiseSuppression(next);
+      return next;
+    });
+  }, []);
+
+  const setNoiseSuppressionExplicit = useCallback((enabled: boolean) => {
+    setNoiseSuppression(enabled);
+    audioEngine.setNoiseSuppression(enabled);
   }, []);
 
   const startRecording = useCallback(async () => {
@@ -633,6 +656,7 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         micPeak,
         isMonitoring,
         echoCancellation,
+        noiseSuppression,
         autoFollowPlayhead,
         countInEnabled,
         countInStep,
@@ -653,6 +677,9 @@ export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         stopRecording,
         toggleMonitoring,
         toggleEchoCancellation,
+        setEchoCancellation: setEchoCancellationExplicit,
+        toggleNoiseSuppression,
+        setNoiseSuppression: setNoiseSuppressionExplicit,
         toggleAutoFollowPlayhead,
         toggleCountIn,
         setSelectedAudioDeviceId,
